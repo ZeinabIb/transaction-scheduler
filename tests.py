@@ -12,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 from scheduler import (
     parse_schedule, analyze,
     analyze_serializability, analyze_recoverability,
+    analyze_view_serializability,
+    ViewSerializabilityResult,
     OpType, Operation, Schedule,
 )
 
@@ -331,6 +333,131 @@ class TestRecoverability:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# VIEW SERIALIZABILITY TESTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestViewSerializability:
+
+    def test_serial_schedule_is_view_serializable(self):
+        """A serial schedule is trivially view-serializable (view-equivalent to itself)."""
+        s = parse_schedule("""
+            START(T1)
+            READ(T1,A)
+            WRITE(T1,A)
+            COMMIT(T1)
+            START(T2)
+            READ(T2,A)
+            WRITE(T2,B)
+            COMMIT(T2)
+        """)
+        r = analyze_view_serializability(s)
+        assert r.is_view_serializable is True
+        assert ["T1", "T2"] in r.equivalent_serial_orders
+
+    def test_conflict_serializable_implies_view_serializable(self):
+        """Every conflict-serializable schedule must also be view-serializable (CS ⊆ VS)."""
+        s = parse_schedule("""
+            START(T1)
+            START(T2)
+            READ(T1,A)
+            WRITE(T1,A)
+            COMMIT(T1)
+            READ(T2,A)
+            WRITE(T2,B)
+            COMMIT(T2)
+        """)
+        cs = analyze_serializability(s)
+        vs = analyze_view_serializability(s)
+        assert cs.is_serializable is True
+        assert vs.is_view_serializable is True
+
+    def test_classic_blind_write_view_serializable_not_conflict(self):
+        """
+        Classic example: view-serializable but NOT conflict-serializable.
+
+        Schedule: READ(T1,A), WRITE(T2,A), WRITE(T1,A), WRITE(T3,A)
+
+        Conflict graph has cycle T1->T2->T1 (RW + WW) -> NOT conflict-serializable.
+
+        View: T1 reads initial A; T3 makes the final write.
+        Serial T1->T2->T3: T1 reads initial A (first), T3 writes last -> MATCH.
+        => View-serializable with order T1->T2->T3.
+        """
+        s = parse_schedule("""
+            START(T1)
+            START(T2)
+            START(T3)
+            READ(T1,A)
+            WRITE(T2,A)
+            WRITE(T1,A)
+            WRITE(T3,A)
+            COMMIT(T1)
+            COMMIT(T2)
+            COMMIT(T3)
+        """)
+        cs = analyze_serializability(s)
+        vs = analyze_view_serializability(s)
+        assert cs.is_serializable is False
+        assert vs.is_view_serializable is True
+        assert ["T1", "T2", "T3"] in vs.equivalent_serial_orders
+
+    def test_non_view_serializable_schedule(self):
+        """
+        Classic non-serializable cycle: neither conflict- nor view-serializable.
+
+        Schedule: READ(T1,A), WRITE(T2,A), READ(T2,B), WRITE(T1,B)
+        T1 must precede T2 (reads initial A) AND T2 must precede T1 (reads initial B).
+        No serial order satisfies both -> NOT view-serializable.
+        """
+        s = parse_schedule("""
+            START(T1)
+            START(T2)
+            READ(T1,A)
+            WRITE(T2,A)
+            READ(T2,B)
+            WRITE(T1,B)
+            COMMIT(T1)
+            COMMIT(T2)
+        """)
+        vs = analyze_view_serializability(s)
+        assert vs.is_view_serializable is False
+        assert vs.equivalent_serial_orders == []
+
+    def test_view_result_dataclass_fields(self):
+        """ViewSerializabilityResult must have the expected fields and types."""
+        s = parse_schedule("""
+            START(T1)
+            WRITE(T1,A)
+            COMMIT(T1)
+        """)
+        r = analyze_view_serializability(s)
+        assert isinstance(r, ViewSerializabilityResult)
+        assert isinstance(r.is_view_serializable, bool)
+        assert isinstance(r.equivalent_serial_orders, list)
+        assert isinstance(r.explanation, list)
+        assert len(r.explanation) > 0
+
+    def test_analyze_report_includes_view_serializability(self):
+        """Full analyze() must return an AnalysisReport with view_serializability field."""
+        report = analyze("""
+            START(T1)
+            START(T2)
+            START(T3)
+            READ(T1,A)
+            WRITE(T2,A)
+            WRITE(T1,A)
+            WRITE(T3,A)
+            COMMIT(T1)
+            COMMIT(T2)
+            COMMIT(T3)
+        """)
+        assert hasattr(report, 'view_serializability')
+        vs = report.view_serializability
+        assert isinstance(vs, ViewSerializabilityResult)
+        assert vs.is_view_serializable is True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # INTEGRATION TESTS
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -363,10 +490,12 @@ class TestIntegration:
             WRITE(T2,B)
             COMMIT(T2)
         """)
-        s = report.serializability
-        r = report.recoverability
-        assert s.is_serializable is True
-        assert r.is_recoverable  is True
-        assert r.is_aca          is True
-        assert r.is_strict       is True
-        assert r.is_rigorous     is True
+        s  = report.serializability
+        r  = report.recoverability
+        vs = report.view_serializability
+        assert s.is_serializable    is True
+        assert r.is_recoverable     is True
+        assert r.is_aca             is True
+        assert r.is_strict          is True
+        assert r.is_rigorous        is True
+        assert vs.is_view_serializable is True

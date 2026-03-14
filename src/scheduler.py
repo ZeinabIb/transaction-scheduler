@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from itertools import permutations
 from typing import Optional
 
 
@@ -180,6 +181,13 @@ class SerializabilityResult:
     cycles:          list[list[str]]
     serial_orders:   list[list[str]]   # topological orderings if no cycle
     explanation:     list[str]
+
+
+@dataclass
+class ViewSerializabilityResult:
+    is_view_serializable:     bool
+    equivalent_serial_orders: list[list[str]]   # empty if not serializable
+    explanation:              list[str]
 
 
 def analyze_serializability(schedule: Schedule) -> SerializabilityResult:
@@ -505,20 +513,126 @@ def _last_accessor_before(ops: list[Operation], tx: str, item: str, step: int) -
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. FULL ANALYSIS  (entry point used by UI)
+# 5. VIEW SERIALIZABILITY
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _extract_view(ops: list[Operation]) -> tuple[dict, dict]:
+    """
+    Extract the view of a schedule.
+    Returns:
+        reads_from:   (reader_tx, item, occurrence_index) -> writer_tx | None
+        final_writes: item -> last_writer_tx
+    occurrence_index is 0-based per (tx, item) pair, handling multiple reads
+    of the same item by the same transaction.
+    """
+    reads_from:  dict = {}
+    final_writes: dict = {}
+    read_counts:  dict = {}
+    last_writer:  dict = {}
+
+    for op in ops:
+        if op.is_read():
+            key = (op.tx, op.item)
+            idx = read_counts.get(key, 0)
+            read_counts[key] = idx + 1
+            reads_from[(op.tx, op.item, idx)] = last_writer.get(op.item)
+        elif op.is_write():
+            last_writer[op.item] = op.tx
+            final_writes[op.item] = op.tx
+
+    return reads_from, final_writes
+
+
+def _serial_ops(schedule: Schedule, order: list[str]) -> list[Operation]:
+    """Build operation list for a serial schedule in the given transaction order."""
+    groups: dict[str, list[Operation]] = {tx: [] for tx in order}
+    for op in schedule.operations:
+        if op.tx in groups:
+            groups[op.tx].append(op)
+    result = []
+    step = 1
+    for tx in order:
+        for op in groups[tx]:
+            result.append(Operation(step=step, tx=op.tx,
+                                    op_type=op.op_type, item=op.item))
+            step += 1
+    return result
+
+
+def _fmt_reads_from(rf: dict) -> str:
+    if not rf:
+        return "{}"
+    parts = []
+    for (tx, item, idx), writer in sorted(rf.items()):
+        occ = f"[{idx}]" if idx > 0 else ""
+        parts.append(f"{tx} reads {item}{occ} from "
+                     f"{'initial' if writer is None else writer}")
+    return "; ".join(parts)
+
+
+def analyze_view_serializability(schedule: Schedule) -> ViewSerializabilityResult:
+    """
+    Check view serializability by comparing the schedule's view against all
+    n! serial schedules of the same transactions.
+
+    Two schedules are view-equivalent iff for every data item X:
+      1. Same transaction reads the initial value of X (initial reads).
+      2. Same Ti reads the value written by the same Tj on X (reads-from).
+      3. Same transaction performs the last write on X (final writes).
+    """
+    ops  = schedule.operations
+    txns = schedule.transactions
+
+    explanation: list[str] = []
+    explanation.append("=== View Serializability Analysis ===")
+
+    s_reads_from, s_final_writes = _extract_view(ops)
+    explanation.append(f"  reads_from  : {_fmt_reads_from(s_reads_from)}")
+    explanation.append(f"  final_writes: {s_final_writes or '(none)'}")
+
+    matching: list[list[str]] = []
+    for perm in permutations(txns):
+        order = list(perm)
+        p_rf, p_fw = _extract_view(_serial_ops(schedule, order))
+        if s_reads_from == p_rf and s_final_writes == p_fw:
+            matching.append(order)
+            explanation.append(
+                f"  View-equivalent serial order: {' → '.join(order)}")
+
+    is_vs = bool(matching)
+    if not is_vs:
+        explanation.append("  No view-equivalent serial schedule found.")
+        explanation.append("  Schedule is NOT view-serializable.")
+    else:
+        explanation.append(
+            f"  Schedule IS view-serializable "
+            f"({len(matching)} equivalent serial order(s)).")
+
+    return ViewSerializabilityResult(
+        is_view_serializable=is_vs,
+        equivalent_serial_orders=matching,
+        explanation=explanation,
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. FULL ANALYSIS  (entry point used by UI)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @dataclass
 class AnalysisReport:
-    schedule:         Schedule
-    serializability:  SerializabilityResult
-    recoverability:   RecoverabilityResult
+    schedule:             Schedule
+    serializability:      SerializabilityResult
+    recoverability:       RecoverabilityResult
+    view_serializability: ViewSerializabilityResult
 
 
 def analyze(schedule_text: str) -> AnalysisReport:
     schedule = parse_schedule(schedule_text)
     ser  = analyze_serializability(schedule)
     rec  = analyze_recoverability(schedule)
+    vser = analyze_view_serializability(schedule)
     return AnalysisReport(schedule=schedule,
                           serializability=ser,
-                          recoverability=rec)
+                          recoverability=rec,
+                          view_serializability=vser)

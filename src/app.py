@@ -82,7 +82,7 @@ HTML = r"""<!DOCTYPE html>
 </head>
 <body>
 <h1>⚡ Transaction Scheduler Simulator</h1>
-<p class="subtitle">Conflict Serializability · Recoverability · ACA · Strict · Rigorous</p>
+<p class="subtitle">Conflict Serializability · View Serializability · Recoverability · ACA · Strict · Rigorous</p>
 
 <div class="grid">
 
@@ -124,11 +124,13 @@ HTML = r"""<!DOCTYPE html>
       <div class="section-title">📊 Results</div>
       <div class="result-grid">
         <div class="prop"><div class="name">Conflict-Serializable</div><div class="val" id="r-serial">—</div></div>
+        <div class="prop"><div class="name">View-Serializable</div><div class="val" id="r-view-serial">—</div></div>
         <div class="prop"><div class="name">Recoverable</div><div class="val" id="r-rec">—</div></div>
         <div class="prop"><div class="name">ACA</div><div class="val" id="r-aca">—</div></div>
         <div class="prop"><div class="name">Strict</div><div class="val" id="r-strict">—</div></div>
         <div class="prop"><div class="name">Rigorous</div><div class="val" id="r-rigorous">—</div></div>
-        <div class="prop"><div class="name">Serial Order(s)</div><div class="val" id="r-orders" style="font-size:12px">—</div></div>
+        <div class="prop"><div class="name">Conflict Serial Order(s)</div><div class="val" id="r-orders" style="font-size:12px">—</div></div>
+        <div class="prop"><div class="name">View Serial Order(s)</div><div class="val" id="r-view-orders" style="font-size:12px">—</div></div>
       </div>
 
       <!-- Precedence graph -->
@@ -183,11 +185,12 @@ function setVal(id, val, isGood){
 }
 
 function clearResults(){
-  ['r-serial','r-rec','r-aca','r-strict','r-rigorous'].forEach(id=>{
+  ['r-serial','r-view-serial','r-rec','r-aca','r-strict','r-rigorous'].forEach(id=>{
     const el=document.getElementById(id);
     el.textContent='—'; el.className='val';
   });
   document.getElementById('r-orders').textContent='—';
+  document.getElementById('r-view-orders').textContent='—';
   document.getElementById('detail-log').textContent='Run an analysis to see details.';
   document.getElementById('graph-g').innerHTML='';
   document.getElementById('graph-empty').style.display='block';
@@ -220,16 +223,22 @@ async function runAnalysis(){
 }
 
 function renderResults(d){
-  setVal('r-serial',   d.is_serializable);
-  setVal('r-rec',      d.is_recoverable);
-  setVal('r-aca',      d.is_aca);
-  setVal('r-strict',   d.is_strict);
-  setVal('r-rigorous', d.is_rigorous);
+  setVal('r-serial',      d.is_serializable);
+  setVal('r-view-serial', d.is_view_serializable);
+  setVal('r-rec',         d.is_recoverable);
+  setVal('r-aca',         d.is_aca);
+  setVal('r-strict',      d.is_strict);
+  setVal('r-rigorous',    d.is_rigorous);
 
   const orders = d.serial_orders.length
     ? d.serial_orders.map(o=>o.join('→')).join(' | ')
     : (d.is_serializable ? '(none)' : 'N/A');
   document.getElementById('r-orders').textContent = orders;
+
+  const viewOrders = d.view_serial_orders && d.view_serial_orders.length
+    ? d.view_serial_orders.map(o=>o.join('→')).join(' | ')
+    : (d.is_view_serializable ? '(none)' : 'N/A');
+  document.getElementById('r-view-orders').textContent = viewOrders;
 
   // Ops table
   const tbody = document.getElementById('ops-body');
@@ -362,9 +371,10 @@ def api_analyze():
     schedule_text = data.get("schedule", "")
     try:
         report = analyze(schedule_text)
-        ser = report.serializability
-        rec = report.recoverability
-        s   = report.schedule
+        ser  = report.serializability
+        rec  = report.recoverability
+        vser = report.view_serializability
+        s    = report.schedule
 
         # Flatten cycle nodes for client-side highlighting
         cycle_flat = list({t for cyc in ser.cycles for t in cyc})
@@ -391,18 +401,20 @@ def api_analyze():
         )
 
         return jsonify({
-            "is_serializable":  ser.is_serializable,
-            "serial_orders":    ser.serial_orders,
-            "cycles":           ser.cycles,
-            "cycles_flat":      cycle_flat,
-            "is_recoverable":   rec.is_recoverable,
-            "is_aca":           rec.is_aca,
-            "is_strict":        rec.is_strict,
-            "is_rigorous":      rec.is_rigorous,
-            "transactions":     s.transactions,
-            "operations":       ops_out,
-            "edges":            edges_out,
-            "explanation":      explanation,
+            "is_serializable":      ser.is_serializable,
+            "serial_orders":        ser.serial_orders,
+            "cycles":               ser.cycles,
+            "cycles_flat":          cycle_flat,
+            "is_recoverable":       rec.is_recoverable,
+            "is_aca":               rec.is_aca,
+            "is_strict":            rec.is_strict,
+            "is_rigorous":          rec.is_rigorous,
+            "is_view_serializable": vser.is_view_serializable,
+            "view_serial_orders":   vser.equivalent_serial_orders,
+            "transactions":         s.transactions,
+            "operations":           ops_out,
+            "edges":                edges_out,
+            "explanation":          explanation,
         })
 
     except ValueError as e:
