@@ -317,8 +317,22 @@ class TestRecoverability:
         if r.is_aca:
             assert r.is_recoverable
 
-    def test_abort_transaction(self):
-        """Transaction that aborts should still affect strictness analysis."""
+    def test_abort_transaction_strict_violation(self):
+        """T2 writes A before T1 (last writer) aborts — strict violation."""
+        s = parse_schedule("""
+            START(T1)
+            START(T2)
+            WRITE(T1,A)
+            WRITE(T2,A)
+            ABORT(T1)
+            COMMIT(T2)
+        """)
+        r = analyze_recoverability(s)
+        # T2 writes A at step 4 before T1 aborts at step 5 — strict violation
+        assert r.is_strict is False
+
+    def test_abort_transaction_no_strict_violation(self):
+        """T2 writes A after T1 (last writer) aborts — NOT a strict violation."""
         s = parse_schedule("""
             START(T1)
             START(T2)
@@ -328,8 +342,8 @@ class TestRecoverability:
             COMMIT(T2)
         """)
         r = analyze_recoverability(s)
-        # T2 writes A before T1 abort step is processed — strict violation
-        assert r.is_strict is False
+        # T2 writes A at step 5, after T1 aborts at step 4 — valid (strict satisfied)
+        assert r.is_strict is True
 
 
 # ─────────────────────────────────────────────────────────────────────────────

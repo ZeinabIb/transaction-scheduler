@@ -103,6 +103,7 @@ HTML = r"""<!DOCTYPE html>
           <option value="non_recoverable">Non-Recoverable</option>
           <option value="strict">Strict Schedule</option>
           <option value="inc_dec">INCREMENT/DECREMENT</option>
+          <option value="blind_write">★ Blind Write (View-serial, Not Conflict-serial)</option>
         </select>
       </div>
       <div id="error-box" style="display:none" class="error-msg"></div>
@@ -124,14 +125,15 @@ HTML = r"""<!DOCTYPE html>
       <div class="section-title">📊 Results</div>
       <div class="result-grid">
         <div class="prop"><div class="name">Conflict-Serializable</div><div class="val" id="r-serial">—</div></div>
-        <div class="prop"><div class="name">View-Serializable</div><div class="val" id="r-view-serial">—</div></div>
+        <div class="prop"><div class="name">View-Serializable ★</div><div class="val" id="r-view-serial">—</div></div>
         <div class="prop"><div class="name">Recoverable</div><div class="val" id="r-rec">—</div></div>
         <div class="prop"><div class="name">ACA</div><div class="val" id="r-aca">—</div></div>
         <div class="prop"><div class="name">Strict</div><div class="val" id="r-strict">—</div></div>
         <div class="prop"><div class="name">Rigorous</div><div class="val" id="r-rigorous">—</div></div>
         <div class="prop"><div class="name">Conflict Serial Order(s)</div><div class="val" id="r-orders" style="font-size:12px">—</div></div>
-        <div class="prop"><div class="name">View Serial Order(s)</div><div class="val" id="r-view-orders" style="font-size:12px">—</div></div>
+        <div class="prop"><div class="name">View Serial Order(s) ★</div><div class="val" id="r-view-orders" style="font-size:12px">—</div></div>
       </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">★ Bonus analysis only — serializability is determined exclusively by conflict equivalence (precedence graph).</div>
 
       <!-- Precedence graph -->
       <div class="section-title">🔗 Precedence Graph</div>
@@ -168,7 +170,8 @@ const DEMOS = {
   dirty_read:`START(T1)\nSTART(T2)\nWRITE(T1,A)\nREAD(T2,A)\nCOMMIT(T1)\nCOMMIT(T2)`,
   non_recoverable:`START(T1)\nSTART(T2)\nWRITE(T1,A)\nREAD(T2,A)\nCOMMIT(T2)\nCOMMIT(T1)`,
   strict:`START(T1)\nSTART(T2)\nWRITE(T1,A)\nCOMMIT(T1)\nREAD(T2,A)\nWRITE(T2,A)\nCOMMIT(T2)`,
-  inc_dec:`START(T1)\nSTART(T2)\nREAD(T1,X)\nINCREMENT(T2,X)\nWRITE(T1,X)\nCOMMIT(T1)\nCOMMIT(T2)`
+  inc_dec:`START(T1)\nSTART(T2)\nREAD(T1,X)\nINCREMENT(T2,X)\nWRITE(T1,X)\nCOMMIT(T1)\nCOMMIT(T2)`,
+  blind_write:`START(T1)\nSTART(T2)\nSTART(T3)\nREAD(T1,A)\nWRITE(T2,A)\nWRITE(T1,A)\nWRITE(T3,A)\nCOMMIT(T1)\nCOMMIT(T2)\nCOMMIT(T3)`
 };
 
 function loadDemo(){ document.getElementById('sched').value = DEMOS.non_serial; }
