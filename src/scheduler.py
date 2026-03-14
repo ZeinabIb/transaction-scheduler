@@ -384,10 +384,13 @@ def analyze_recoverability(schedule: Schedule) -> RecoverabilityResult:
         wj_commit = commit_step.get(writer)
         if ti_commit is None:
             continue   # Ti never commits — no recoverability issue
+        wj_abort = abort_step.get(writer)
         if wj_commit is None:
-            # writer never committed → Ti committed without writer committing first
-            msg = (f"  VIOLATION: {op.tx} reads {op.item} written by {writer}, "
-                   f"but {writer} never commits while {op.tx} commits at step {ti_commit}.")
+            # writer aborted or is still active — Ti committed without writer committing
+            outcome = "aborted" if wj_abort is not None else "never commits"
+            msg = (f"  VIOLATION: {op.tx} reads {op.item} written by {writer} "
+                   f"(step {op.step}), but {writer} {outcome} while "
+                   f"{op.tx} commits at step {ti_commit}.")
             rec_violations.append(msg)
             explanation.append(msg)
         elif ti_commit < wj_commit:
@@ -401,6 +404,9 @@ def analyze_recoverability(schedule: Schedule) -> RecoverabilityResult:
     if is_recoverable:
         explanation.append("  ✓ Recoverable: all transactions commit after "
                            "the transactions whose data they read.")
+    else:
+        explanation.append("  ✗ NOT Recoverable: a transaction committed before "
+                           "a transaction whose data it read.")
 
     # ── ACA ──────────────────────────────────────────────────────────────────
     aca_violations: list[str] = []
@@ -414,15 +420,25 @@ def analyze_recoverability(schedule: Schedule) -> RecoverabilityResult:
             continue
         wj_commit = commit_step.get(writer)
         # ACA: Ti may only read data written by Tj if Tj committed before this read
+        wj_abort = abort_step.get(writer)
         if wj_commit is None or wj_commit > op.step:
+            if wj_abort is not None and wj_abort < op.step:
+                status = f"{writer} already aborted before this read"
+            elif wj_commit is None:
+                status = f"{writer} has not committed"
+            else:
+                status = f"{writer} commits later at step {wj_commit}"
             msg = (f"  VIOLATION: {op.tx} reads {op.item} (step {op.step}) "
-                   f"written by {writer}, which has not yet committed.")
+                   f"written by {writer} — {status}.")
             aca_violations.append(msg)
             explanation.append(msg)
 
     is_aca = len(aca_violations) == 0
     if is_aca:
         explanation.append("  ✓ ACA: all reads are from committed transactions.")
+    else:
+        explanation.append("  ✗ NOT ACA: a transaction read data written by an "
+                           "uncommitted (or aborted) transaction.")
 
     # ── Strict ────────────────────────────────────────────────────────────────
     # No R or W on X until the last transaction that wrote X has committed/aborted.
@@ -451,6 +467,9 @@ def analyze_recoverability(schedule: Schedule) -> RecoverabilityResult:
     is_strict = len(strict_violations) == 0
     if is_strict:
         explanation.append("  ✓ Strict: no R/W on item until last writer committed/aborted.")
+    else:
+        explanation.append("  ✗ NOT Strict: a transaction read or wrote an item "
+                           "before the last writer committed/aborted.")
 
     # ── Rigorous ──────────────────────────────────────────────────────────────
     # Stronger: no R or W until the last READ or WRITE lock holder committed/aborted.
@@ -480,6 +499,9 @@ def analyze_recoverability(schedule: Schedule) -> RecoverabilityResult:
     is_rigorous = len(rigorous_violations) == 0
     if is_rigorous:
         explanation.append("  ✓ Rigorous: no R/W on item until last accessor committed/aborted.")
+    else:
+        explanation.append("  ✗ NOT Rigorous: a transaction read or wrote an item "
+                           "before the last accessor (reader or writer) committed/aborted.")
 
     return RecoverabilityResult(
         is_recoverable=is_recoverable,

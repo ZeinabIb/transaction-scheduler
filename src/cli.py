@@ -77,18 +77,22 @@ def print_report(report: AnalysisReport,
     print(f"    Rigorous     : {_tick(rec.is_rigorous)}")
     print(f"\n  (Hierarchy: Rigorous ⊂ Strict ⊂ ACA ⊂ Recoverable)")
 
-    # ── VIEW SERIALIZABILITY ───────────────────────────────────────────────────
+    # ── BONUS: VIEW SERIALIZABILITY ────────────────────────────────────────────
     vser = report.view_serializability
     print(f"\n{_sep()}")
-    print("VIEW SERIALIZABILITY")
+    print("BONUS: VIEW SERIALIZABILITY  (additional analysis — beyond required)")
     print(_sep())
+    print("  Note: The required serializability determination above uses ONLY")
+    print("  conflict equivalence (precedence graph). View equivalence is provided")
+    print("  here as an extra analysis and is NOT used for the conflict-serializable result.")
+    print()
     for line in vser.explanation:
         print(line)
     print(f"\n  Result  →  View-Serializable: {_tick(vser.is_view_serializable)}")
     if vser.is_view_serializable and vser.equivalent_serial_orders:
         orders_str = " | ".join(" → ".join(o) for o in vser.equivalent_serial_orders)
         print(f"  View-equivalent serial order(s): {orders_str}")
-    print(f"\n  (View Serializable ⊇ Conflict Serializable)")
+    print(f"\n  (View Serializable ⊇ Conflict Serializable: every CS schedule is also VS)")
 
     # ── BONUS 1: Step-by-step trace ───────────────────────────────────────────
     if show_trace:
@@ -167,6 +171,18 @@ INCREMENT(T2,X)
 WRITE(T1,X)
 COMMIT(T1)
 COMMIT(T2)
+""",
+    "7 - BONUS: View-serializable but NOT conflict-serializable (blind write)": """
+START(T1)
+START(T2)
+START(T3)
+READ(T1,A)
+WRITE(T2,A)
+WRITE(T1,A)
+WRITE(T3,A)
+COMMIT(T1)
+COMMIT(T2)
+COMMIT(T3)
 """,
 }
 
