@@ -77,6 +77,19 @@ def print_report(report: AnalysisReport,
     print(f"    Rigorous     : {_tick(rec.is_rigorous)}")
     print(f"\n  (Hierarchy: Rigorous ⊂ Strict ⊂ ACA ⊂ Recoverable)")
 
+    # ── VIEW SERIALIZABILITY ───────────────────────────────────────────────────
+    vser = report.view_serializability
+    print(f"\n{_sep()}")
+    print("VIEW SERIALIZABILITY")
+    print(_sep())
+    for line in vser.explanation:
+        print(line)
+    print(f"\n  Result  →  View-Serializable: {_tick(vser.is_view_serializable)}")
+    if vser.is_view_serializable and vser.equivalent_serial_orders:
+        orders_str = " | ".join(" → ".join(o) for o in vser.equivalent_serial_orders)
+        print(f"  View-equivalent serial order(s): {orders_str}")
+    print(f"\n  (View Serializable ⊇ Conflict Serializable)")
+
     # ── BONUS 1: Step-by-step trace ───────────────────────────────────────────
     if show_trace:
         print(f"\n{_sep()}")
